@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.hbabb.omarchy-jetbrains",
+  "name": "Omarchy Theme Generator for JetBrains IDEs",
+  "version": "1.0.0",
+  "author": "hbabb",
+  "description": "Turns your current Omarchy theme into a matching JetBrains IDE theme (PyCharm, IntelliJ IDEA, WebStorm, GoLand, …) with UI colors and an editor color scheme, and reinstalls it whenever you switch themes.",
+  "kinds": ["service"],
+  "entryPoints": { "service": "Service.qml" }
+}

@@ -1,0 +1,7 @@
+{
+  "notify.title": "JetBrains theme updated",
+  "notify.body": {
+    "one": "%1 is installed in %2 JetBrains IDE. Restart it, then pick the theme under Settings › Appearance.",
+    "other": "%1 is installed in %2 JetBrains IDEs. Restart them, then pick the theme under Settings › Appearance."
+  }
+}
