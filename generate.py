@@ -64,7 +64,9 @@ elif args.theme:
     SRC = Path(args.theme)
     if not SRC.is_file():
         for base in (Path.home() / ".config/omarchy/themes", Path("/usr/share/omarchy/themes")):
-            if (base / args.theme / "colors.toml").is_file():
+            # A theme dir counts if it has either palette source; the alacritty.toml
+            # fallback below needs SRC to point into it.
+            if any((base / args.theme / f).is_file() for f in ("colors.toml", "alacritty.toml")):
                 SRC = base / args.theme / "colors.toml"
                 break
     SLUG = SRC.parent.name

@@ -46,7 +46,7 @@ omarchy plugin validate .
 2. **If you changed the palette handling, build every theme:**
    ```bash
    for d in ~/.config/omarchy/themes/*/ /usr/share/omarchy/themes/*/; do
-     python3 generate.py "$d/colors.toml" --out /tmp/omarchy-jetbrains-all --json >/dev/null || echo "FAIL $d"
+     python3 generate.py "$(basename "$d")" --out /tmp/omarchy-jetbrains-all --json >/dev/null || echo "FAIL $d"
    done
    ```
 3. **Check the XML** in the generated scheme:
