@@ -14,21 +14,26 @@ Usage:
   --out DIR   build directory (default: ./build)
   --json      print a machine-readable summary instead of text
 
-Outputs into <out>/<slug>/ : <Pascal>.jar (installable plugin), <Pascal>.theme.json and
-"<Name>.icls" (the color scheme alone, for Settings > Editor > Color Scheme > Import Scheme).
+Outputs into <out>/<slug>/ : <File>.jar (installable plugin), <File>.theme.json and
+<File>.icls (the color scheme alone, for Settings > Editor > Color Scheme > Import Scheme),
+where <File> is the PascalCase theme slug (e.g. ForestNight). The generator only replaces
+files it wrote there itself and refuses to touch a directory it didn't create.
 
 Syntax colors default to a generic mapping of the Omarchy palette; themes listed in
 PROFILES override individual roles (e.g. to match an upstream VS Code theme).
 """
 import argparse
+import io
 import json
+import os
 import re
-import shutil
+import stat
 import subprocess
 import sys
 import tomllib
 import zipfile
 from pathlib import Path
+from xml.sax.saxutils import escape, quoteattr
 
 HERE = Path(__file__).resolve().parent
 STATE = Path.home() / ".local/state/omarchy/current"
@@ -78,10 +83,14 @@ if not SRC.is_file():
     die(f"colors.toml not found: {SRC}")
 if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", SLUG):
     SLUG = re.sub(r"[^a-z0-9._-]+", "-", SLUG.lower()).strip("-.") or "theme"
-NAME = args.name or SLUG.replace("-", " ").title()
-PASCAL = NAME.replace(" ", "")
+DEFAULT_NAME = SLUG.replace("-", " ").title()
+# The display name is only ever used as data: escaped in XML, JSON-encoded in JSON.
+# Drop control characters (not allowed in XML 1.0) and keep it to a sane length.
+NAME = re.sub(r"[\x00-\x1f\x7f]", "", args.name or "").strip()[:100] or DEFAULT_NAME
+# File and resource names come from the sanitized slug, never from --name.
+FILE = re.sub(r"[^A-Za-z0-9._-]", "", DEFAULT_NAME.replace(" ", "")) or "Theme"
 ID = f"io.github.hbabb.omarchy-jetbrains.{SLUG}"
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 
 raw = tomllib.loads(SRC.read_text())
 if SRC.name == "alacritty.toml":
@@ -420,9 +429,9 @@ attributes = {
 
 def icls():
     parent = "Darcula" if DARK else "Default"
-    out = [f'<scheme name="{NAME}" version="142" parent_scheme="{parent}">',
+    out = [f'<scheme name={quoteattr(NAME)} version="142" parent_scheme="{parent}">',
            '  <metaInfo>', f'    <property name="created">2026-11-20</property>',
-           f'    <property name="originalScheme">{NAME}</property>', '  </metaInfo>', '  <colors>']
+           f'    <property name="originalScheme">{escape(NAME)}</property>', '  </metaInfo>', '  <colors>']
     for k, v in editor_colors.items():
         if v:
             out.append(f'    <option name="{k}" value="{v}" />')
@@ -448,7 +457,7 @@ theme = {
     "author": "hbabb",
     # The IDE only loads bundled schemes with an .xml extension; an .icls path is
     # silently ignored ("Theme X refers to unknown color scheme").
-    "editorScheme": f"/themes/{PASCAL}.xml",
+    "editorScheme": f"/themes/{FILE}.xml",
     "colors": {
         "bg": h(bg), "bgDark": h(bg_dark), "bgDarker": h(bg_darker), "bgLight": h(bg_light),
         "hover": h(bg_hover), "border": h(border), "fg": h(fg), "fgDim": h(fg_dim),
@@ -784,40 +793,142 @@ theme = {
     },
 }
 
+# The description is HTML carried as XML text: escape the name for HTML, then the
+# whole fragment for XML.
+DESCRIPTION = (f"<p>{escape(NAME)} &mdash; a UI theme and editor color scheme generated from "
+               f"the Omarchy <i>{escape(NAME)}</i> theme.</p>")
 PLUGIN_XML = f"""<idea-plugin>
   <id>{ID}</id>
-  <name>{NAME} Theme (Omarchy)</name>
+  <name>{escape(NAME + " Theme (Omarchy)")}</name>
   <version>{VERSION}</version>
   <vendor url="https://github.com/hbabb/omarchy-jetbrains">hbabb</vendor>
-  <description><![CDATA[
-    <p>{NAME} &mdash; a dark UI theme and editor color scheme ported from the
-    Omarchy <i>{NAME}</i> theme.</p>
-  ]]></description>
+  <description>{escape(DESCRIPTION)}</description>
   <idea-version since-build="242"/>
   <depends>com.intellij.modules.platform</depends>
   <extensions defaultExtensionNs="com.intellij">
-    <themeProvider id="{ID}" path="/themes/{PASCAL}.theme.json"/>
+    <themeProvider id="{ID}" path="/themes/{FILE}.theme.json"/>
   </extensions>
 </idea-plugin>
 """
 
+# --------------------------------------------------------------------------
+# Build output. <out>/<slug>/ is only ever touched if this generator owns it:
+# it records the files it wrote in a marker, and on the next run replaces just
+# those. A directory it doesn't own is never modified.
+# --------------------------------------------------------------------------
+MARKER = ".omarchy-jetbrains-build.json"
 out = args.out / SLUG
-shutil.rmtree(out, ignore_errors=True)
-out.mkdir(parents=True)
+outputs = {"icls": f"{FILE}.icls", "theme": f"{FILE}.theme.json", "jar": f"{FILE}.jar"}
+
+
+def regular_file(path):
+    """True for a regular file that is not a symlink (never follows links)."""
+    try:
+        return stat.S_ISREG(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+
+def safe_write(path, data):
+    """Atomically replace path with data without ever following a symlink.
+
+    The content goes to a fresh temp file created with O_EXCL | O_NOFOLLOW, then
+    os.replace swaps it in; if path is a symlink, the link itself is replaced,
+    never its target.
+    """
+    data = data.encode() if isinstance(data, str) else data
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def legacy_owned(entries):
+    """Names in a pre-marker build dir, if the generator verifiably wrote all of them.
+
+    Older versions wrote <P>.jar, <P>.theme.json and "<Name>.icls", where Name was the
+    display name (--name or the default) and P is Name without spaces. Ownership is
+    proved by the jar itself: it must be this theme's plugin (same plugin ID) and
+    register <P>.theme.json; the .icls must match the name recorded in it.
+    """
+    names = set(entries)
+    jars = [n for n in names if n.endswith(".jar")]
+    if not names or len(names) > 3 or len(jars) != 1 or not all(regular_file(e) for e in entries.values()):
+        return None
+    stem = jars[0][:-len(".jar")]
+    try:
+        with zipfile.ZipFile(entries[jars[0]]) as z:
+            plugin_xml = z.read("META-INF/plugin.xml").decode("utf-8")
+    except (OSError, KeyError, ValueError, zipfile.BadZipFile):
+        return None
+    if f"<id>{ID}</id>" not in plugin_xml or f'path="/themes/{stem}.theme.json"' not in plugin_xml:
+        return None
+    m = re.search(r"<name>(.*?) Theme(?: \(Omarchy\))?</name>", plugin_xml)
+    allowed = {jars[0], f"{stem}.theme.json"} | ({f"{m.group(1)}.icls"} if m else set())
+    return names if names <= allowed else None
+
+
+def owned_names(d):
+    """Names in d that an earlier run of this generator wrote, or None if d isn't ours."""
+    entries = {e.name: e for e in d.iterdir()}
+    if not entries:
+        return set()
+    marker = entries.get(MARKER)
+    if marker is None:
+        return legacy_owned(entries)
+    if not regular_file(marker):
+        return None  # a symlinked or special marker proves nothing
+    try:
+        data = json.loads(marker.read_text())
+        names = data["files"] if data.get("generator") == "omarchy-jetbrains" else None
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        names = None
+    if not isinstance(names, list):
+        return None
+    # Only plain files directly inside d count; anything else listed is ignored.
+    return {n for n in names if isinstance(n, str) and n in entries and n != MARKER
+            and regular_file(entries[n])} | {MARKER}
+
+
+if out.is_symlink() or (out.exists() and not out.is_dir()):
+    die(f"refusing to write to {out}: it is not a directory this generator created")
+if out.is_dir():
+    owned = owned_names(out)
+    if owned is None:
+        die(f"refusing to write to {out}: it contains files this generator didn't create; "
+            f"pick another --out")
+    # Never overwrite something the generator doesn't own, even under one of its names.
+    clash = [n for n in (*outputs.values(), MARKER) if os.path.lexists(out / n) and n not in owned]
+    if clash:
+        die(f"refusing to write to {out}: {', '.join(clash)} already exists and wasn't "
+            f"created by this generator")
+    for n in owned - {*outputs.values(), MARKER}:
+        (out / n).unlink()  # outputs from an older naming scheme; removes links, not targets
+out.mkdir(parents=True, exist_ok=True)
+
 scheme = icls()
 theme_json = json.dumps(theme, indent=2)
-(out / f"{NAME}.icls").write_text(scheme)
-(out / f"{PASCAL}.theme.json").write_text(theme_json)
-jar = out / f"{PASCAL}.jar"
-with zipfile.ZipFile(jar, "w", zipfile.ZIP_DEFLATED) as z:
+jar_bytes = io.BytesIO()
+with zipfile.ZipFile(jar_bytes, "w", zipfile.ZIP_DEFLATED) as z:
     # Fixed timestamps keep the jar byte-identical across runs, so --install can tell
     # whether anything actually changed.
     for name, data in (("META-INF/plugin.xml", PLUGIN_XML),
-                       (f"themes/{PASCAL}.theme.json", theme_json),
-                       (f"themes/{PASCAL}.xml", scheme)):
+                       (f"themes/{FILE}.theme.json", theme_json),
+                       (f"themes/{FILE}.xml", scheme)):
         info = zipfile.ZipInfo(name, date_time=(2024, 1, 1, 0, 0, 0))
         info.compress_type = zipfile.ZIP_DEFLATED
         z.writestr(info, data)
+jar = out / outputs["jar"]
+safe_write(out / outputs["icls"], scheme)
+safe_write(out / outputs["theme"], theme_json)
+safe_write(jar, jar_bytes.getvalue())
+safe_write(out / MARKER, json.dumps({"generator": "omarchy-jetbrains",
+                                     "files": sorted(outputs.values())}) + "\n")
 
 
 def ide_dirs():
@@ -843,10 +954,8 @@ if args.install:
     dirs = ide_dirs()
     for d in dirs:
         dest = d / f"omarchy-theme-{SLUG}.jar"
-        if not dest.exists() or dest.read_bytes() != payload:
-            tmp = dest.with_suffix(".jar.tmp")
-            tmp.write_bytes(payload)
-            tmp.replace(dest)
+        if not regular_file(dest) or dest.read_bytes() != payload:
+            safe_write(dest, payload)
             changed = True
         installed.append(d.name)
     # Rebuild themes installed earlier so generator fixes reach them too. Each one is
@@ -870,7 +979,7 @@ if args.json:
     print(json.dumps({"ok": True, "theme": SLUG, "name": NAME, "dark": DARK, "jar": str(jar),
                       "installed": installed, "changed": changed, "refreshed": refreshed}))
 else:
-    print(f"Built {jar} and {out / (NAME + '.icls')}")
+    print(f"Built {jar} and {out / outputs['icls']}")
     if args.install:
         if installed:
             print(f"Installed into {len(installed)} IDE(s): {', '.join(installed)}"

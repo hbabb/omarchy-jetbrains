@@ -63,7 +63,7 @@ switcher, which shows themes that are installed as Marketplace plugins.
   `~/.local/share/JetBrains/<Product><version>/`. It creates that directory for IDEs that
   have a config directory in `~/.config/JetBrains/` but no plugin directory yet.
 - It keeps its build output in `~/.cache/omarchy-jetbrains/`. That includes a standalone
-  `<Theme Name>.icls` for each theme, which you can import with Settings → Editor → Color
+  `<ThemeName>.icls` (for example `ForestNight.icls`) for each theme, which you can import with Settings → Editor → Color
   Scheme → ⚙ → *Import Scheme…* if you only want the editor colors.
 - Updates also rebuild any older `omarchy-theme-*.jar` it installed before, so fixes reach
   themes you aren't currently using.
@@ -147,9 +147,9 @@ python3 generate.py path/to/colors.toml --name "My Theme"
 |---|---|
 | `--current` | Use the theme Omarchy has applied (`~/.local/state/omarchy/current`) |
 | `--install` | Copy the jar into every JetBrains IDE as `omarchy-theme-<slug>.jar` |
-| `--out DIR` | Build directory (default `./build`) |
+| `--out DIR` | Build directory (default `./build`). See the note below. |
 | `--json` | Print a machine-readable summary |
-| `--name` | Display name (default: from the theme name) |
+| `--name` | Display name shown in the IDE (default: from the theme name). It doesn't affect file names. |
 
 Output goes to `<out>/<theme-slug>/`:
 
@@ -157,8 +157,15 @@ Output goes to `<out>/<theme-slug>/`:
 build/forest-night/
 ├── ForestNight.jar          # installable plugin (UI theme + color scheme)
 ├── ForestNight.theme.json   # the UI theme, for inspection
-└── Forest Night.icls        # color scheme only, importable on its own
+├── ForestNight.icls         # color scheme only, importable on its own
+└── .omarchy-jetbrains-build.json  # list of the files above, so later runs replace only those
 ```
+
+File names come from the theme's slug, never from `--name`. The generator **never deletes
+anything it didn't create.** On a rebuild it replaces only the files listed in
+`.omarchy-jetbrains-build.json` and leaves anything else in the folder alone. If
+`<out>/<theme-slug>/` already exists and wasn't created by the generator, the run stops with an
+error instead of writing there. It never writes through a symlink.
 
 To install a jar by hand, go to Settings → Plugins → ⚙ → *Install Plugin from Disk…* and
 restart. To use only the color scheme, go to Settings → Editor → Color Scheme → ⚙ →
