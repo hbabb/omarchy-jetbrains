@@ -65,7 +65,7 @@ omarchy plugin validate .
   syntax.
 - **Keep the plugin's footprint small.** The service may only write
   `omarchy-theme-*.jar` files into JetBrains plugin directories and its own cache. It must
-  never change IDE settings or which theme is selected, use sudo or the network, or
+  never change IDE settings or which theme is selected, request root privileges or use the network, or
   interpolate untrusted values into shell commands. Pass arguments as an array.
 - **Put user-facing plugin strings in `i18n/en.json`** and read them with
   `strings.t()` or `strings.tn()`.

@@ -69,8 +69,8 @@ switcher, which shows themes that are installed as Marketplace plugins.
   themes you aren't currently using.
 - It **never** changes which theme or color scheme an IDE uses, and never edits IDE settings.
   You choose the theme yourself.
-- It doesn't use sudo or the network, and it doesn't run anything when a plugin update is
-  downloaded.
+- It runs entirely as your user without root privileges, never uses the network, and doesn't
+  run anything when a plugin update is downloaded.
 
 Each Omarchy theme you switch to adds its own JetBrains theme, so all of them stay available in
 the IDE's theme list.
