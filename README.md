@@ -43,7 +43,11 @@ the background, and a notification tells you when there's a new theme to pick.
 - It writes `omarchy-theme-<theme>.jar` into each IDE's plugin directory,
   `~/.local/share/JetBrains/<Product><version>/`. It creates that directory for IDEs that
   have a config directory in `~/.config/JetBrains/` but no plugin directory yet.
-- It keeps its build output in `~/.cache/omarchy-jetbrains/`.
+- It keeps its build output in `~/.cache/omarchy-jetbrains/`. That includes a standalone
+  `<Theme Name>.icls` for each theme, which you can import with Settings → Editor → Color
+  Scheme → ⚙ → *Import Scheme…* if you only want the editor colors.
+- Updates also rebuild any older `omarchy-theme-*.jar` it installed before, so fixes reach
+  themes you aren't currently using.
 - It **never** changes which theme or color scheme an IDE uses, and never edits IDE settings.
   You choose the theme yourself.
 - It doesn't use sudo or the network, and it doesn't run anything when a plugin update is
@@ -80,6 +84,17 @@ rm -rf ~/.cache/omarchy-jetbrains
 
 Restart your IDEs after removing the jars. If an IDE was using one of the themes, it switches
 back to its default theme.
+
+### Troubleshooting
+
+- **The editor color scheme is missing:** each theme's color scheme is listed under
+  Settings → Editor → Color Scheme with the same name as the theme. Jars built before
+  version 1.0.1 packaged the scheme in a way the IDE ignores (its log says *Theme X refers to
+  unknown color scheme /themes/X.icls*). Update the plugin, run
+  `omarchy-shell omarchy-jetbrains sync`, and restart the IDE.
+- **The same theme is listed twice, or the IDE warns about a duplicate plugin:** delete any
+  jar you installed by hand from `build/` (for example `ForestNight.jar`). The plugin's
+  `omarchy-theme-<theme>.jar` uses the same plugin ID.
 
 ## Dependencies
 

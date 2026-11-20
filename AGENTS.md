@@ -58,7 +58,10 @@ themes (useful sources for profiles) may be installed under `~/.vscode/extension
   dependencies, and don't use syntax newer than 3.11 (such as reusing the same quote type
   inside an f-string).
 - **`--json` output is the plugin's contract.** `Service.qml` parses the last stdout line
-  (`ok`, `theme`, `name`, `installed`, `changed`, or `error`). Keep that shape compatible.
+  (`ok`, `theme`, `name`, `installed`, `changed`, `refreshed`, or `error`). Keep that shape compatible.
+- **The color scheme inside the jar must be `.xml`** (`themes/<Pascal>.xml`, referenced by
+  `editorScheme`). The IDE ignores `.icls` paths there and logs "refers to unknown color
+  scheme". The standalone `.icls` in the build directory is only for manual import.
 - **Jars must stay reproducible.** Use fixed `ZipInfo` timestamps, because `changed` relies on
   byte comparison.
 - **Colors are 6-digit lowercase hex without `#`** inside the script. Add `#` only when

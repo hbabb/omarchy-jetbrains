@@ -71,7 +71,8 @@ Item {
     var first = lastTheme === ""
     lastTheme = String(r.theme)
     var count = Array.isArray(r.installed) ? r.installed.length : 0
-    if (first || !r.changed || !notify || count === 0) return
+    var updated = r.changed || (Array.isArray(r.refreshed) && r.refreshed.length > 0)
+    if (first || !updated || !notify || count === 0) return
     notifyProc.command = [
       "omarchy-notification-send", "-u", "low",
       strings.t("notify.title"),
