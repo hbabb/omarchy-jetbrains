@@ -14,7 +14,8 @@ Usage:
   --out DIR   build directory (default: ./build)
   --json      print a machine-readable summary instead of text
 
-Outputs into <out>/<slug>/ : <Pascal>.jar (installable plugin), <Pascal>.theme.json and "<Name>.icls".
+Outputs into <out>/<slug>/ : <Pascal>.jar (installable plugin), <Pascal>.theme.json and
+"<Name>.icls" (the color scheme alone, for Settings > Editor > Color Scheme > Import Scheme).
 
 Syntax colors default to a generic mapping of the Omarchy palette; themes listed in
 PROFILES override individual roles (e.g. to match an upstream VS Code theme).
@@ -23,6 +24,7 @@ import argparse
 import json
 import re
 import shutil
+import subprocess
 import sys
 import tomllib
 import zipfile
@@ -39,6 +41,8 @@ ap.add_argument("--current", action="store_true", help="use the currently applie
 ap.add_argument("--install", action="store_true", help="install the jar into every JetBrains IDE found")
 ap.add_argument("--out", type=Path, default=HERE / "build", help="build directory")
 ap.add_argument("--json", action="store_true", help="print a JSON summary")
+ap.add_argument("--no-refresh", action="store_true",
+                help="with --install, don't rebuild other previously installed omarchy-theme-*.jar")
 args = ap.parse_args()
 
 
@@ -75,7 +79,7 @@ if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", SLUG):
 NAME = args.name or SLUG.replace("-", " ").title()
 PASCAL = NAME.replace(" ", "")
 ID = f"io.github.hbabb.omarchy-jetbrains.{SLUG}"
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 raw = tomllib.loads(SRC.read_text())
 if SRC.name == "alacritty.toml":
@@ -440,7 +444,9 @@ theme = {
     "name": NAME,
     "dark": DARK,
     "author": "hbabb",
-    "editorScheme": f"/themes/{PASCAL}.icls",
+    # The IDE only loads bundled schemes with an .xml extension; an .icls path is
+    # silently ignored ("Theme X refers to unknown color scheme").
+    "editorScheme": f"/themes/{PASCAL}.xml",
     "colors": {
         "bg": h(bg), "bgDark": h(bg_dark), "bgDarker": h(bg_darker), "bgLight": h(bg_light),
         "hover": h(bg_hover), "border": h(border), "fg": h(fg), "fgDim": h(fg_dim),
@@ -806,7 +812,7 @@ with zipfile.ZipFile(jar, "w", zipfile.ZIP_DEFLATED) as z:
     # whether anything actually changed.
     for name, data in (("META-INF/plugin.xml", PLUGIN_XML),
                        (f"themes/{PASCAL}.theme.json", theme_json),
-                       (f"themes/{PASCAL}.icls", scheme)):
+                       (f"themes/{PASCAL}.xml", scheme)):
         info = zipfile.ZipInfo(name, date_time=(2024, 1, 1, 0, 0, 0))
         info.compress_type = zipfile.ZIP_DEFLATED
         z.writestr(info, data)
@@ -829,10 +835,11 @@ def ide_dirs():
     return dirs
 
 
-installed, changed = [], False
+installed, changed, refreshed = [], False, []
 if args.install:
     payload = jar.read_bytes()
-    for d in ide_dirs():
+    dirs = ide_dirs()
+    for d in dirs:
         dest = d / f"omarchy-theme-{SLUG}.jar"
         if not dest.exists() or dest.read_bytes() != payload:
             tmp = dest.with_suffix(".jar.tmp")
@@ -840,15 +847,33 @@ if args.install:
             tmp.replace(dest)
             changed = True
         installed.append(d.name)
+    # Rebuild themes installed earlier so generator fixes reach them too. Each one is
+    # its own run (the generator is one theme per process); themes whose source is
+    # gone are left alone.
+    if not args.no_refresh:
+        others = sorted({j.name[len("omarchy-theme-"):-len(".jar")]
+                         for d in dirs for j in d.glob("omarchy-theme-*.jar")} - {SLUG})
+        for other in others:
+            r = subprocess.run([sys.executable, str(Path(__file__).resolve()), other, "--install",
+                                "--no-refresh", "--json", "--out", str(args.out)],
+                               capture_output=True, text=True)
+            try:
+                res = json.loads(r.stdout.strip().splitlines()[-1])
+            except (ValueError, IndexError):
+                continue
+            if res.get("ok") and res.get("changed"):
+                refreshed.append(other)
 
 if args.json:
     print(json.dumps({"ok": True, "theme": SLUG, "name": NAME, "dark": DARK, "jar": str(jar),
-                      "installed": installed, "changed": changed}))
+                      "installed": installed, "changed": changed, "refreshed": refreshed}))
 else:
     print(f"Built {jar} and {out / (NAME + '.icls')}")
     if args.install:
         if installed:
             print(f"Installed into {len(installed)} IDE(s): {', '.join(installed)}"
                   + ("" if changed else " (already up to date)"))
+            if refreshed:
+                print(f"Rebuilt previously installed themes: {', '.join(refreshed)}")
         else:
             print(f"No JetBrains IDEs found under {JETBRAINS_DATA}")
