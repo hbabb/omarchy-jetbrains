@@ -63,6 +63,11 @@ themes (useful sources for profiles) may be installed under `~/.vscode/extension
   marker (`.omarchy-jetbrains-build.json`): replace only the files it lists, and refuse a
   `<out>/<slug>` directory you don't own. Don't bring back `rmtree` or any other recursive
   delete.
+- **Never follow symlinks when writing.** Write every file with `safe_write()` (an
+  O_EXCL|O_NOFOLLOW temp file, then `os.replace`), and check ownership with `regular_file()`
+  (`lstat`). A symlinked marker or output proves nothing and must never be written through.
+  Folders built before the marker existed are accepted only if their jar has this theme's
+  plugin ID (see `legacy_owned()`).
 - **`--name` is display data only.** File and resource names come from `FILE` (the
   sanitized slug). Escape the name with `escape()` or `quoteattr()` in XML, and put it in
   JSON with `json.dumps`. Never interpolate it raw.

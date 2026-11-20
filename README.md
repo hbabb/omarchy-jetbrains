@@ -165,7 +165,7 @@ File names come from the theme's slug, never from `--name`. The generator **neve
 anything it didn't create.** On a rebuild it replaces only the files listed in
 `.omarchy-jetbrains-build.json` and leaves anything else in the folder alone. If
 `<out>/<theme-slug>/` already exists and wasn't created by the generator, the run stops with an
-error instead of writing there.
+error instead of writing there. It never writes through a symlink.
 
 To install a jar by hand, go to Settings → Plugins → ⚙ → *Install Plugin from Disk…* and
 restart. To use only the color scheme, go to Settings → Editor → Color Scheme → ⚙ →
