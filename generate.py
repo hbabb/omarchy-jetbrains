@@ -3,6 +3,7 @@
 
 Usage: python3 generate.py [omarchy-theme-name | path/to/colors.toml] [--name "Display Name"]
   e.g. python3 generate.py asia-neon
+       python3 generate.py forest-night
 Outputs into ./build/<slug>/ : <Pascal>.jar (installable plugin) and "<Name>.icls".
 
 Syntax colors default to a generic mapping of the Omarchy palette; themes listed in
@@ -66,6 +67,20 @@ R = dict(
     sql_kw_font=None, button_fg=bg_darker, progress=accent, progress_end=magenta,
 )
 PROFILES = {
+    # Mirrors "Forest Night - Ethereal" VS Code theme (forrest-knight.forest-night-theme)
+    "forest-night": dict(
+        keyword="f39c12", string="4ecdc4", escape="f39c12", number="8fbc8f", constant="8fbc8f",
+        comment="4a5568", doc="6b7280", doc_tag="4ecdc4", py_doc="4ecdc4",
+        func_decl="9b59b6", func_call="9b59b6", builtin="9b59b6", builtin_font="1",
+        klass="c78a7a", type_hint="c78a7a", param="c9d1d9", self="c78a7a", field="66d9ef",
+        static_field="8fbc8f", global_var="c9d1d9", kwarg="c9d1d9", decorator="f39c12",
+        operator="c9d1d9", punct="8fa1b3", braces="c9d1d9", fstring="66d9ef", regex="c78a7a",
+        tag="f39c12", attr="4ecdc4", attr_value="66d9ef", prop_key="66d9ef", md_header="f39c12",
+        md_link="66d9ef", caret="6b8fa3", line_active="6b8fa3", button="9b59b6", focus="6b8fa3",
+        link="66d9ef", css_prop="4ecdc4", css_value="8fbc8f", yaml_key="4ecdc4",
+        md_h2="f39c12", md_h3="f39c12", sql_kw_font="1", button_fg="ffffff",
+        progress="9b59b6", progress_end="8fbc8f",
+    ),
 }
 R.update(PROFILES.get(SLUG, {}))
 
