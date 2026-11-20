@@ -31,6 +31,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 STATE = Path.home() / ".local/state/omarchy/current"
 JETBRAINS_DATA = Path.home() / ".local/share/JetBrains"
+JETBRAINS_CONFIG = Path.home() / ".config/JetBrains"
 ap = argparse.ArgumentParser(description="Omarchy Theme Generator for JetBrains IDEs")
 ap.add_argument("theme", nargs="?", help="Omarchy theme name or path to a colors.toml")
 ap.add_argument("--name", help="display name (default: derived from the theme name)")
@@ -812,11 +813,20 @@ with zipfile.ZipFile(jar, "w", zipfile.ZIP_DEFLATED) as z:
 
 
 def ide_dirs():
-    """JetBrains IDE data dirs, e.g. ~/.local/share/JetBrains/PyCharm2026.3."""
-    if not JETBRAINS_DATA.is_dir():
-        return []
-    return sorted(d for d in JETBRAINS_DATA.iterdir()
-                  if d.is_dir() and re.fullmatch(r"[A-Za-z]+\d{4}\.\d+", d.name))
+    """Plugin dirs for every JetBrains IDE that has run, e.g. ~/.local/share/JetBrains/PyCharm2026.3.
+
+    An IDE only creates its data dir once it needs one, so IDEs known from their config
+    dir (~/.config/JetBrains/<Product><version>) get a data dir created for them.
+    """
+    ide = re.compile(r"[A-Za-z]+\d{4}\.\d+")
+    names = set()
+    for root in (JETBRAINS_DATA, JETBRAINS_CONFIG):
+        if root.is_dir():
+            names.update(d.name for d in root.iterdir() if d.is_dir() and ide.fullmatch(d.name))
+    dirs = [JETBRAINS_DATA / n for n in sorted(names)]
+    for d in dirs:
+        d.mkdir(parents=True, exist_ok=True)
+    return dirs
 
 
 installed, changed = [], False
