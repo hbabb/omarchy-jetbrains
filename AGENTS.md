@@ -96,4 +96,6 @@ themes (useful sources for profiles) may be installed under `~/.vscode/extension
   you're asked to.
 - Don't present generated themes as official Omarchy or JetBrains products: keep the vendor
   and author fields as they are.
-- Follow the commit style in `CONTRIBUTING.md`: imperative subject, with a body that explains why.
+- Use [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `chore:`, …) as described in
+  `CONTRIBUTING.md`, with a body that explains why. Make changes on a branch and open a PR,
+  because `main` is protected.
