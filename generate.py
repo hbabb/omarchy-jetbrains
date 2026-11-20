@@ -1,36 +1,99 @@
 #!/usr/bin/env python3
-"""Generate a JetBrains (PyCharm) theme plugin from an Omarchy colors.toml.
+"""Omarchy Theme Generator for JetBrains IDEs.
 
-Usage: python3 generate.py [omarchy-theme-name | path/to/colors.toml] [--name "Display Name"]
-  e.g. python3 generate.py asia-neon
-       python3 generate.py forest-night
-Outputs into ./build/<slug>/ : <Pascal>.jar (installable plugin) and "<Name>.icls".
+Builds a JetBrains IDE theme plugin (UI theme + editor color scheme) from an Omarchy
+theme's colors.toml.
+
+Usage:
+  python3 generate.py <omarchy-theme-name | path/to/colors.toml> [--name "Display Name"]
+  python3 generate.py --current [--install] [--json]
+
+  --current   use the theme Omarchy currently has applied
+  --install   copy the jar into every JetBrains IDE config found under
+              ~/.local/share/JetBrains/ (as omarchy-theme-<slug>.jar)
+  --out DIR   build directory (default: ./build)
+  --json      print a machine-readable summary instead of text
+
+Outputs into <out>/<slug>/ : <Pascal>.jar (installable plugin), <Pascal>.theme.json and
+"<Name>.icls" (the color scheme alone, for Settings > Editor > Color Scheme > Import Scheme).
 
 Syntax colors default to a generic mapping of the Omarchy palette; themes listed in
 PROFILES override individual roles (e.g. to match an upstream VS Code theme).
 """
 import argparse
 import json
+import re
 import shutil
+import subprocess
+import sys
 import tomllib
 import zipfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ap = argparse.ArgumentParser()
-ap.add_argument("theme", nargs="?", default="asia-neon")
-ap.add_argument("--name")
+STATE = Path.home() / ".local/state/omarchy/current"
+JETBRAINS_DATA = Path.home() / ".local/share/JetBrains"
+JETBRAINS_CONFIG = Path.home() / ".config/JetBrains"
+ap = argparse.ArgumentParser(description="Omarchy Theme Generator for JetBrains IDEs")
+ap.add_argument("theme", nargs="?", help="Omarchy theme name or path to a colors.toml")
+ap.add_argument("--name", help="display name (default: derived from the theme name)")
+ap.add_argument("--current", action="store_true", help="use the currently applied Omarchy theme")
+ap.add_argument("--install", action="store_true", help="install the jar into every JetBrains IDE found")
+ap.add_argument("--out", type=Path, default=HERE / "build", help="build directory")
+ap.add_argument("--json", action="store_true", help="print a JSON summary")
+ap.add_argument("--no-refresh", action="store_true",
+                help="with --install, don't rebuild other previously installed omarchy-theme-*.jar")
 args = ap.parse_args()
-SRC = Path(args.theme)
+
+
+def die(msg):
+    if args.json:
+        print(json.dumps({"ok": False, "error": msg}))
+    else:
+        print(f"generate.py: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+if args.current:
+    SRC = STATE / "theme" / "colors.toml"
+    try:
+        SLUG = (STATE / "theme.name").read_text().strip()
+    except OSError:
+        die(f"no current Omarchy theme found at {STATE}")
+elif args.theme:
+    SRC = Path(args.theme)
+    if not SRC.is_file():
+        for base in (Path.home() / ".config/omarchy/themes", Path("/usr/share/omarchy/themes")):
+            # A theme dir counts if it has either palette source; the alacritty.toml
+            # fallback below needs SRC to point into it.
+            if any((base / args.theme / f).is_file() for f in ("colors.toml", "alacritty.toml")):
+                SRC = base / args.theme / "colors.toml"
+                break
+    SLUG = SRC.parent.name
+else:
+    ap.error("give a theme name, a colors.toml path, or --current")
+if not SRC.is_file() and (SRC.parent / "alacritty.toml").is_file():
+    SRC = SRC.parent / "alacritty.toml"  # older Omarchy themes have no colors.toml
 if not SRC.is_file():
-    SRC = Path.home() / ".config/omarchy/themes" / args.theme / "colors.toml"
-SLUG = SRC.parent.name
+    die(f"colors.toml not found: {SRC}")
+if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", SLUG):
+    SLUG = re.sub(r"[^a-z0-9._-]+", "-", SLUG.lower()).strip("-.") or "theme"
 NAME = args.name or SLUG.replace("-", " ").title()
 PASCAL = NAME.replace(" ", "")
 ID = f"io.github.hbabb.omarchy-jetbrains.{SLUG}"
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
-c = {k: v.lstrip("#").lower() for k, v in tomllib.loads(SRC.read_text()).items() if isinstance(v, str) and v.startswith("#")}
+raw = tomllib.loads(SRC.read_text())
+if SRC.name == "alacritty.toml":
+    ac = raw.get("colors", {})
+    raw = {**ac.get("primary", {}), "accent": ac.get("cursor", {}).get("cursor", "")}
+    raw.update({k: v for k, v in ac.get("normal", {}).items() if k not in ("black", "white")})
+    raw.update({f"bright_{k}": v for k, v in ac.get("bright", {}).items() if k not in ("black", "white")})
+    raw["muted"] = ac.get("bright", {}).get("black", "")
+    lum = sum(int(raw.get("background", "#000000").lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
+    raw["mode"] = "light" if lum > 384 else "dark"
+DARK = str(raw.get("mode", "dark")).lower() != "light"
+c = {k: v.lstrip("#").lower() for k, v in raw.items() if isinstance(v, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", v)}
 
 
 def mix(a, b, t):
@@ -38,6 +101,33 @@ def mix(a, b, t):
     pa = [int(a[i:i + 2], 16) for i in (0, 2, 4)]
     pb = [int(b[i:i + 2], 16) for i in (0, 2, 4)]
     return "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(pa, pb))
+
+
+# Older Omarchy themes only ship terminal colors (color0..color15); map them to names.
+for i, name in enumerate(["", "red", "green", "yellow", "blue", "magenta", "cyan", "", "muted",
+                          "bright_red", "bright_green", "bright_yellow", "bright_blue",
+                          "bright_magenta", "bright_cyan", "bright_foreground"]):
+    if name and f"color{i}" in c:
+        c.setdefault(name, c[f"color{i}"])
+REQUIRED = ["background", "foreground", "red", "green", "yellow", "blue", "magenta", "cyan"]
+missing = [k for k in REQUIRED if k not in c]
+if missing:
+    die(f"{SRC} is missing colors: {', '.join(missing)}")
+# Fill in anything optional from what the theme does define.
+_bg, _fg, _shade = c["background"], c["foreground"], "000000"
+c.setdefault("accent", c["blue"])
+c.setdefault("dark_background", mix(_bg, _shade, 0.2 if DARK else 0.04))
+c.setdefault("darker_background", mix(_bg, _shade, 0.35 if DARK else 0.09))
+c.setdefault("lighter_background", mix(_bg, _fg, 0.1))
+c.setdefault("dark_foreground", mix(_fg, _bg, 0.35))
+c.setdefault("light_foreground", _fg)
+c.setdefault("bright_foreground", _fg)
+c.setdefault("muted", mix(_fg, _bg, 0.55))
+c.setdefault("selection", mix(_bg, c["accent"], 0.3))
+c.setdefault("orange", mix(c["red"], c["yellow"], 0.5))
+c.setdefault("brown", mix(c["orange"], _bg, 0.4))
+for base in ("red", "yellow", "green", "cyan", "blue", "magenta"):
+    c.setdefault(f"bright_{base}", c[base])
 
 
 bg, bg_dark, bg_darker, bg_light = c["background"], c["dark_background"], c["darker_background"], c["lighter_background"]
@@ -329,7 +419,8 @@ attributes = {
 
 
 def icls():
-    out = [f'<scheme name="{NAME}" version="142" parent_scheme="Darcula">',
+    parent = "Darcula" if DARK else "Default"
+    out = [f'<scheme name="{NAME}" version="142" parent_scheme="{parent}">',
            '  <metaInfo>', f'    <property name="created">2026-11-20</property>',
            f'    <property name="originalScheme">{NAME}</property>', '  </metaInfo>', '  <colors>']
     for k, v in editor_colors.items():
@@ -353,9 +444,11 @@ def icls():
 h = lambda x: "#" + x
 theme = {
     "name": NAME,
-    "dark": True,
+    "dark": DARK,
     "author": "hbabb",
-    "editorScheme": f"/themes/{PASCAL}.icls",
+    # The IDE only loads bundled schemes with an .xml extension; an .icls path is
+    # silently ignored ("Theme X refers to unknown color scheme").
+    "editorScheme": f"/themes/{PASCAL}.xml",
     "colors": {
         "bg": h(bg), "bgDark": h(bg_dark), "bgDarker": h(bg_darker), "bgLight": h(bg_light),
         "hover": h(bg_hover), "border": h(border), "fg": h(fg), "fgDim": h(fg_dim),
@@ -693,7 +786,7 @@ theme = {
 
 PLUGIN_XML = f"""<idea-plugin>
   <id>{ID}</id>
-  <name>{NAME} Theme</name>
+  <name>{NAME} Theme (Omarchy)</name>
   <version>{VERSION}</version>
   <vendor url="https://github.com/hbabb/omarchy-jetbrains">hbabb</vendor>
   <description><![CDATA[
@@ -708,14 +801,81 @@ PLUGIN_XML = f"""<idea-plugin>
 </idea-plugin>
 """
 
-out = HERE / "build" / SLUG
+out = args.out / SLUG
 shutil.rmtree(out, ignore_errors=True)
 out.mkdir(parents=True)
 scheme = icls()
+theme_json = json.dumps(theme, indent=2)
 (out / f"{NAME}.icls").write_text(scheme)
-(out / f"{PASCAL}.theme.json").write_text(json.dumps(theme, indent=2))
-with zipfile.ZipFile(out / f"{PASCAL}.jar", "w", zipfile.ZIP_DEFLATED) as z:
-    z.writestr("META-INF/plugin.xml", PLUGIN_XML)
-    z.writestr(f"themes/{PASCAL}.theme.json", json.dumps(theme, indent=2))
-    z.writestr(f"themes/{PASCAL}.icls", scheme)
-print(f"Built {out / (PASCAL + '.jar')} and {out / (NAME + '.icls')}")
+(out / f"{PASCAL}.theme.json").write_text(theme_json)
+jar = out / f"{PASCAL}.jar"
+with zipfile.ZipFile(jar, "w", zipfile.ZIP_DEFLATED) as z:
+    # Fixed timestamps keep the jar byte-identical across runs, so --install can tell
+    # whether anything actually changed.
+    for name, data in (("META-INF/plugin.xml", PLUGIN_XML),
+                       (f"themes/{PASCAL}.theme.json", theme_json),
+                       (f"themes/{PASCAL}.xml", scheme)):
+        info = zipfile.ZipInfo(name, date_time=(2024, 1, 1, 0, 0, 0))
+        info.compress_type = zipfile.ZIP_DEFLATED
+        z.writestr(info, data)
+
+
+def ide_dirs():
+    """Plugin dirs for every JetBrains IDE that has run, e.g. ~/.local/share/JetBrains/PyCharm2026.3.
+
+    An IDE only creates its data dir once it needs one, so IDEs known from their config
+    dir (~/.config/JetBrains/<Product><version>) get a data dir created for them.
+    """
+    ide = re.compile(r"[A-Za-z]+\d{4}\.\d+")
+    names = set()
+    for root in (JETBRAINS_DATA, JETBRAINS_CONFIG):
+        if root.is_dir():
+            names.update(d.name for d in root.iterdir() if d.is_dir() and ide.fullmatch(d.name))
+    dirs = [JETBRAINS_DATA / n for n in sorted(names)]
+    for d in dirs:
+        d.mkdir(parents=True, exist_ok=True)
+    return dirs
+
+
+installed, changed, refreshed = [], False, []
+if args.install:
+    payload = jar.read_bytes()
+    dirs = ide_dirs()
+    for d in dirs:
+        dest = d / f"omarchy-theme-{SLUG}.jar"
+        if not dest.exists() or dest.read_bytes() != payload:
+            tmp = dest.with_suffix(".jar.tmp")
+            tmp.write_bytes(payload)
+            tmp.replace(dest)
+            changed = True
+        installed.append(d.name)
+    # Rebuild themes installed earlier so generator fixes reach them too. Each one is
+    # its own run (the generator is one theme per process); themes whose source is
+    # gone are left alone.
+    if not args.no_refresh:
+        others = sorted({j.name[len("omarchy-theme-"):-len(".jar")]
+                         for d in dirs for j in d.glob("omarchy-theme-*.jar")} - {SLUG})
+        for other in others:
+            r = subprocess.run([sys.executable, str(Path(__file__).resolve()), other, "--install",
+                                "--no-refresh", "--json", "--out", str(args.out)],
+                               capture_output=True, text=True)
+            try:
+                res = json.loads(r.stdout.strip().splitlines()[-1])
+            except (ValueError, IndexError):
+                continue
+            if res.get("ok") and res.get("changed"):
+                refreshed.append(other)
+
+if args.json:
+    print(json.dumps({"ok": True, "theme": SLUG, "name": NAME, "dark": DARK, "jar": str(jar),
+                      "installed": installed, "changed": changed, "refreshed": refreshed}))
+else:
+    print(f"Built {jar} and {out / (NAME + '.icls')}")
+    if args.install:
+        if installed:
+            print(f"Installed into {len(installed)} IDE(s): {', '.join(installed)}"
+                  + ("" if changed else " (already up to date)"))
+            if refreshed:
+                print(f"Rebuilt previously installed themes: {', '.join(refreshed)}")
+        else:
+            print(f"No JetBrains IDEs found under {JETBRAINS_DATA}")

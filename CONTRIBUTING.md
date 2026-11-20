@@ -19,23 +19,56 @@ python3 generate.py asia-neon          # or any theme in ~/.config/omarchy/theme
 Install the jar from `build/<slug>/` in a JetBrains IDE (Plugins → ⚙ → *Install Plugin from
 Disk…*) and look at your changes. Restart the IDE after you replace a jar.
 
+### Working on the Omarchy plugin
+
+To run your checkout as the live plugin, link it into the plugins directory and enable it:
+
+```bash
+ln -s "$PWD" ~/.config/omarchy/plugins/io.github.hbabb.omarchy-jetbrains
+omarchy-shell shell rescanPlugins
+omarchy plugin enable io.github.hbabb.omarchy-jetbrains
+```
+
+Saving `Service.qml` reloads the plugin automatically. Use `omarchy-shell omarchy-jetbrains sync`
+to force a rebuild, and follow the shell log with `journalctl --user -f | grep omarchy-jetbrains`.
+Before pushing, check the manifest:
+
+```bash
+omarchy plugin validate .
+```
+
 ## Before opening a pull request
 
 1. **Regenerate every theme you touched** and check that each build succeeds:
    ```bash
    for t in asia-neon forest-night; do python3 generate.py "$t"; done
    ```
-2. **Check the XML** in the generated scheme:
+2. **If you changed the palette handling, build every theme:**
+   ```bash
+   for d in ~/.config/omarchy/themes/*/ /usr/share/omarchy/themes/*/; do
+     python3 generate.py "$(basename "$d")" --out /tmp/omarchy-jetbrains-all --json >/dev/null || echo "FAIL $d"
+   done
+   ```
+3. **Check the XML** in the generated scheme:
    ```bash
    python3 -c "import glob, xml.dom.minidom as m; [m.parse(f) for f in glob.glob('build/*/*.icls')]"
    ```
-3. **Look at it in an IDE.** Include a screenshot of the editor and a tool window in the PR
+4. **Validate the plugin manifest:** `omarchy plugin validate .`
+5. **Look at it in an IDE.** Include a screenshot of the editor and a tool window in the PR
    if you changed colors.
-4. **Don't commit `build/`.** It's generated output and is git-ignored.
+6. **Don't commit `build/`.** It's generated output and is git-ignored.
+7. **Bump `version` in `manifest.json`** for any change users should receive.
 
 ## Guidelines
 
-- **Keep it one dependency-free script.** Use only the standard library.
+- **Keep it one dependency-free script.** Use only the standard library and Python 3.11
+  syntax.
+- **Keep the plugin's footprint small.** The service may only write
+  `omarchy-theme-*.jar` files into JetBrains plugin directories and its own cache. It must
+  never change IDE settings or which theme is selected, use sudo or the network, or
+  interpolate untrusted values into shell commands. Pass arguments as an array.
+- **Put user-facing plugin strings in `i18n/en.json`** and read them with
+  `strings.t()` or `strings.tn()`.
 - **Use roles, not raw colors.** Syntax colors in `attributes` should read from `R[...]`, so
   profiles can override them. To add a role, give it a palette default in `R` and use it.
 - **Profiles override only what they need.** Name the source (for example, the upstream VS
