@@ -25,7 +25,7 @@ There are no packages and no test framework.
 | `manifest.json` | Omarchy plugin manifest (schemaVersion 1). The `id` is permanent. Bump `version` on releases. |
 | `Service.qml` | Headless Quickshell service: watches `~/.local/state/omarchy/current/theme.name`, debounces, runs the generator, sends a notification, and has an `omarchy-jetbrains` IPC target (`ping`, `sync`, `current`) |
 | `i18n/en.json` | Plugin UI strings (Omarchy `Commons.Translations` catalog). Add other languages as `<code>.json`. |
-| `build/<slug>/` | Generated output (git-ignored). Never edit or commit it. |
+| `build/<slug>/` | Generated output (git-ignored). Never edit or commit it. `.omarchy-jetbrains-build.json` lists the files the generator owns there. |
 | `README.md`, `CONTRIBUTING.md` | User and contributor docs. Keep them in sync with CLI or behavior changes. |
 
 ## Commands
@@ -59,7 +59,14 @@ themes (useful sources for profiles) may be installed under `~/.vscode/extension
   inside an f-string).
 - **`--json` output is the plugin's contract.** `Service.qml` parses the last stdout line
   (`ok`, `theme`, `name`, `installed`, `changed`, `refreshed`, or `error`). Keep that shape compatible.
-- **The color scheme inside the jar must be `.xml`** (`themes/<Pascal>.xml`, referenced by
+- **Never delete what the generator didn't write.** Build output goes through the ownership
+  marker (`.omarchy-jetbrains-build.json`): replace only the files it lists, and refuse a
+  `<out>/<slug>` directory you don't own. Don't bring back `rmtree` or any other recursive
+  delete.
+- **`--name` is display data only.** File and resource names come from `FILE` (the
+  sanitized slug). Escape the name with `escape()` or `quoteattr()` in XML, and put it in
+  JSON with `json.dumps`. Never interpolate it raw.
+- **The color scheme inside the jar must be `.xml`** (`themes/<File>.xml`, referenced by
   `editorScheme`). The IDE ignores `.icls` paths there and logs "refers to unknown color
   scheme". The standalone `.icls` in the build directory is only for manual import.
 - **Jars must stay reproducible.** Use fixed `ZipInfo` timestamps, because `changed` relies on
