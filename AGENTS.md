@@ -89,11 +89,16 @@ themes (useful sources for profiles) may be installed under `~/.vscode/extension
 - Don't commit `build/` output or the IDE's `.idea/` folder.
 - The plugin may only write `omarchy-theme-*.jar` files into JetBrains plugin directories and
   its own cache (`~/.cache/omarchy-jetbrains`). It must never edit IDE settings (`laf.xml`,
-  `colors.scheme.xml`, …) or switch the selected theme, and must never use sudo or the
+  `colors.scheme.xml`, …) or switch the selected theme, and must never request root privileges or use the
   network. The marketplace submission checklist requires this.
+- Don't write the literal names of privilege-escalation commands anywhere in the repo, not
+  even to say the plugin doesn't use them. The marketplace security scan flags them for
+  manual review. Say "root privileges" instead.
 - Don't add symlinks inside the repo. `omarchy plugin validate` rejects them.
 - Don't change files under `~/.config/omarchy` or the user's IDE config folders unless
   you're asked to.
 - Don't present generated themes as official Omarchy or JetBrains products: keep the vendor
   and author fields as they are.
-- Follow the commit style in `CONTRIBUTING.md`: imperative subject, with a body that explains why.
+- Use [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `chore:`, …) as described in
+  `CONTRIBUTING.md`, with a body that explains why. Make changes on a branch and open a PR,
+  because `main` is protected.

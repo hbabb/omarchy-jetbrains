@@ -65,7 +65,7 @@ omarchy plugin validate .
   syntax.
 - **Keep the plugin's footprint small.** The service may only write
   `omarchy-theme-*.jar` files into JetBrains plugin directories and its own cache. It must
-  never change IDE settings or which theme is selected, use sudo or the network, or
+  never change IDE settings or which theme is selected, request root privileges or use the network, or
   interpolate untrusted values into shell commands. Pass arguments as an array.
 - **Put user-facing plugin strings in `i18n/en.json`** and read them with
   `strings.t()` or `strings.tn()`.
@@ -83,8 +83,16 @@ omarchy plugin validate .
 
 ## Commits and pull requests
 
-- Use short, imperative commit subjects ("Add Tokyo Night profile"), and explain *why* in
-  the body when it isn't obvious.
+- **This repo prefers [Conventional Commits](https://www.conventionalcommits.org/).** Write
+  the subject as `<type>(<optional scope>): <short imperative summary>`, for example:
+  - `feat(profiles): add Tokyo Night profile`
+  - `fix(plugin): refresh legacy themes on install`
+  - `docs: add restart instructions`
+
+  Common types are `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `build`, `ci` and
+  `chore`. Mark breaking changes with `!` (for example `feat!:`) or a `BREAKING CHANGE:`
+  footer. Changing a plugin ID or the `--json` output counts as breaking.
+- Explain *why* in the commit body when it isn't obvious.
 - Keep each PR to one topic.
 - Fill in what changed, which themes and IDE versions you tested, and screenshots for
   visual changes.

@@ -22,6 +22,10 @@ Each generated theme includes:
 
 The UI theme links to its color scheme, so picking the theme also switches the editor colors.
 
+| Blueridge Dark, with the "theme updated" notification | Flexoki Light |
+|---|---|
+| ![PyCharm with the Blueridge Dark theme and the Omarchy notification "JetBrains theme updated: Blueridge Dark is installed in 12 JetBrains IDEs"](docs/screenshots/notification-blueridge-dark.png) | ![PyCharm editing Python with the Flexoki Light theme](docs/screenshots/editor-flexoki-light.png) |
+
 ## Install as an Omarchy plugin
 
 ```bash
@@ -31,12 +35,27 @@ omarchy plugin add https://github.com/hbabb/omarchy-jetbrains --enable
 Or from the desktop: open the Omarchy menu and go to *Setup › Plugins › Add Plugin*.
 
 Once it's enabled, the service right away builds a theme from your current Omarchy theme and
-installs it into each JetBrains IDE. **Restart the IDE**, then go to Settings → Appearance &
-Behavior → Appearance → *Theme* and pick the theme. It has the same name as your Omarchy
-theme, for example *Forest Night*.
+installs it into each JetBrains IDE.
 
 Each time you run `omarchy theme set …`, the matching JetBrains theme is built and installed in
 the background, and a notification tells you when there's a new theme to pick.
+
+### Use the theme in your IDE
+
+1. **Restart the IDE.** JetBrains IDEs only load new themes at startup. Any of these works:
+   - **Menu:** *File → Restart IDE*.
+   - **Find Action:** press `Ctrl+Shift+A` (this is the shortcut with the VS Code keymap),
+     type `Restart IDE`, and press Enter.
+   - Quit the IDE completely and start it again. Closing the project window isn't enough.
+2. **Pick the theme in Settings.** Open Settings (`Ctrl+Alt+S`) → Appearance & Behavior →
+   Appearance → *Theme*. The theme has the same name as your Omarchy theme, for example
+   *Forest Night*. Its color scheme is selected automatically, and it's also listed under
+   Editor → Color Scheme.
+
+The generated themes **only appear in Settings**. They aren't listed in the IDE's theme
+switcher, which shows themes that are installed as Marketplace plugins.
+
+![Settings → Appearance with Theme set to Flexoki Light and Editor color scheme set to Flexoki Light (theme default)](docs/screenshots/settings-appearance.png)
 
 ### What it changes
 
@@ -50,8 +69,8 @@ the background, and a notification tells you when there's a new theme to pick.
   themes you aren't currently using.
 - It **never** changes which theme or color scheme an IDE uses, and never edits IDE settings.
   You choose the theme yourself.
-- It doesn't use sudo or the network, and it doesn't run anything when a plugin update is
-  downloaded.
+- It runs entirely as your user without root privileges, never uses the network, and doesn't
+  run anything when a plugin update is downloaded.
 
 Each Omarchy theme you switch to adds its own JetBrains theme, so all of them stay available in
 the IDE's theme list.
@@ -87,6 +106,10 @@ back to its default theme.
 
 ### Troubleshooting
 
+- **The theme isn't listed:** restart the IDE (see [Use the theme in your IDE](#use-the-theme-in-your-ide))
+  and look in Settings → Appearance, not the theme switcher. If it's still missing, check that
+  `~/.local/share/JetBrains/<IDE>/omarchy-theme-<theme>.jar` exists, or run
+  `omarchy-shell omarchy-jetbrains sync`.
 - **The editor color scheme is missing:** each theme's color scheme is listed under
   Settings → Editor → Color Scheme with the same name as the theme. Jars built before
   version 1.0.1 packaged the scheme in a way the IDE ignores (its log says *Theme X refers to
