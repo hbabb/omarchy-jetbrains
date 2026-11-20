@@ -1,46 +1,119 @@
-# omarchy-jetbrains
+# Omarchy Theme Generator for JetBrains IDEs
 
-Turn [Omarchy](https://omarchy.org) desktop themes into matching JetBrains IDE themes
-(PyCharm, IntelliJ IDEA, WebStorm, GoLand, CLion, RustRover, DataGrip, PhpStorm, …).
+Give your JetBrains IDEs (PyCharm, IntelliJ IDEA, WebStorm, GoLand, CLion, RustRover, DataGrip,
+PhpStorm, …) the same colors as your [Omarchy](https://omarchy.org) desktop theme.
 
-One script reads an Omarchy theme's `colors.toml` and builds an installable plugin `.jar` that
-contains:
+It works two ways:
 
-- **A UI theme** (`.theme.json`) that styles the IDE's windows, tool windows, tabs, popups,
-  buttons, inputs, progress bars, notifications, version control and debugger colors.
-- **An editor color scheme** (`.icls`) with syntax colors (Python plus shared defaults, HTML/XML,
-  CSS, JSON/YAML/TOML, Markdown, SQL, shell), console and ANSI colors, diff and VCS markers,
-  search highlights, and error and warning effects.
+- **As an Omarchy plugin:** a background service that builds a matching JetBrains theme for
+  the Omarchy theme you have applied, and installs it into every JetBrains IDE you use. It does
+  this again each time you switch themes.
+- **As a command-line tool:** `generate.py` builds a theme plugin `.jar` from any Omarchy
+  theme, so you can install it yourself or share it.
+
+Each generated theme includes:
+
+- **A UI theme** (`.theme.json`) that styles windows, tool windows, tabs, popups, buttons,
+  inputs, progress bars, notifications, version control and debugger colors. Light themes
+  get a light UI.
+- **An editor color scheme** (`.icls`) with syntax colors (Python plus shared defaults,
+  HTML/XML, CSS, JSON/YAML/TOML, Markdown, SQL, shell), console and ANSI colors, diff and VCS
+  markers, search highlights, and error and warning effects.
 
 The UI theme links to its color scheme, so picking the theme also switches the editor colors.
 
-## Supported themes
-
-Any Omarchy theme that has a `colors.toml` works. These two have been tuned:
-
-| Omarchy theme | Syntax colors |
-|---|---|
-| `asia-neon` | Default palette mapping: magenta keywords, neon-green strings, blue functions, yellow classes, cyan decorators |
-| `forest-night` | Profile copied from the *Forest Night – Ethereal* VS Code theme: amber keywords, teal strings, purple functions, rose types, sage constants |
-
-## Requirements
-
-- Python 3.11 or newer (uses the standard-library `tomllib`; nothing else to install)
-- Omarchy themes in `~/.config/omarchy/themes/`, or a path to any `colors.toml`
-- A JetBrains IDE, build 242 (2024.2) or newer
-
-## Usage
+## Install as an Omarchy plugin
 
 ```bash
-# By Omarchy theme name (looked up in ~/.config/omarchy/themes/<name>/colors.toml)
+omarchy plugin add https://github.com/hbabb/omarchy-jetbrains --enable
+```
+
+Or from the desktop: open the Omarchy menu and go to *Setup › Plugins › Add Plugin*.
+
+Once it's enabled, the service right away builds a theme from your current Omarchy theme and
+installs it into each JetBrains IDE. **Restart the IDE**, then go to Settings → Appearance &
+Behavior → Appearance → *Theme* and pick the theme. It has the same name as your Omarchy
+theme, for example *Forest Night*.
+
+Each time you run `omarchy theme set …`, the matching JetBrains theme is built and installed in
+the background, and a notification tells you when there's a new theme to pick.
+
+### What it changes
+
+- It writes `omarchy-theme-<theme>.jar` into each IDE's plugin directory,
+  `~/.local/share/JetBrains/<Product><version>/`. It creates that directory for IDEs that
+  have a config directory in `~/.config/JetBrains/` but no plugin directory yet.
+- It keeps its build output in `~/.cache/omarchy-jetbrains/`.
+- It **never** changes which theme or color scheme an IDE uses, and never edits IDE settings.
+  You choose the theme yourself.
+- It doesn't use sudo or the network, and it doesn't run anything when a plugin update is
+  downloaded.
+
+Each Omarchy theme you switch to adds its own JetBrains theme, so all of them stay available in
+the IDE's theme list.
+
+### Settings
+
+To turn off the notification, add or edit the plugin's entry in `~/.config/omarchy/shell.json`:
+
+```json
+{ "plugins": [ { "id": "io.github.hbabb.omarchy-jetbrains", "notify": false } ] }
+```
+
+To rebuild and reinstall on demand: `omarchy-shell omarchy-jetbrains sync`.
+
+### Update
+
+```bash
+omarchy plugin update io.github.hbabb.omarchy-jetbrains
+```
+
+### Remove
+
+```bash
+omarchy plugin remove io.github.hbabb.omarchy-jetbrains
+
+# Optional: remove the generated JetBrains themes and the build cache
+rm -f ~/.local/share/JetBrains/*/omarchy-theme-*.jar
+rm -rf ~/.cache/omarchy-jetbrains
+```
+
+Restart your IDEs after removing the jars. If an IDE was using one of the themes, it switches
+back to its default theme.
+
+## Dependencies
+
+- Omarchy (Quattro) with the Omarchy shell
+- Python 3.11 or newer (`python3`; uses the standard-library `tomllib`, nothing else to
+  install)
+- A JetBrains IDE, build 242 (2024.2) or newer. IDEs installed through Toolbox or by hand
+  both work, since both keep their plugins under `~/.local/share/JetBrains/`.
+
+## Command-line use
+
+You don't need the plugin to use the generator:
+
+```bash
+# By Omarchy theme name (checks ~/.config/omarchy/themes and the stock themes)
 python3 generate.py asia-neon
 python3 generate.py forest-night
 
-# Or point at any colors.toml, with an optional display name
+# The theme Omarchy has applied right now, installed into every JetBrains IDE
+python3 generate.py --current --install
+
+# Any colors.toml, with an optional display name
 python3 generate.py path/to/colors.toml --name "My Theme"
 ```
 
-Output goes to `build/<theme-slug>/`:
+| Option | Meaning |
+|---|---|
+| `--current` | Use the theme Omarchy has applied (`~/.local/state/omarchy/current`) |
+| `--install` | Copy the jar into every JetBrains IDE as `omarchy-theme-<slug>.jar` |
+| `--out DIR` | Build directory (default `./build`) |
+| `--json` | Print a machine-readable summary |
+| `--name` | Display name (default: from the theme name) |
+
+Output goes to `<out>/<theme-slug>/`:
 
 ```
 build/forest-night/
@@ -49,32 +122,42 @@ build/forest-night/
 └── Forest Night.icls        # color scheme only, importable on its own
 ```
 
-## Installing in your IDE
+To install a jar by hand, go to Settings → Plugins → ⚙ → *Install Plugin from Disk…* and
+restart. To use only the color scheme, go to Settings → Editor → Color Scheme → ⚙ →
+*Import Scheme…*.
 
-**From disk (recommended):** open Settings → Plugins → ⚙ → *Install Plugin from Disk…*, pick
-the `.jar`, and restart. Then choose the theme under Settings → Appearance & Behavior →
-Appearance → *Theme*.
+## Supported themes
 
-**By copying:** put the jar in the IDE's plugin folder and restart, for example:
+Any Omarchy theme works:
 
-```bash
-cp build/forest-night/ForestNight.jar ~/.local/share/JetBrains/PyCharm2026.3/
-```
+- Current themes with a `colors.toml`, dark or light.
+- Older themes that only define `color0`–`color15`, or only ship an `alacritty.toml`.
+- Optional colors a theme leaves out (orange, the background shades, muted, selection, the
+  bright colors) are filled in from the colors it does have.
 
-**Color scheme only:** Settings → Editor → Color Scheme → ⚙ → *Import Scheme…* and pick the
-`.icls`.
+These have hand-tuned syntax colors:
+
+| Omarchy theme | Syntax colors |
+|---|---|
+| `asia-neon` | Default palette mapping: magenta keywords, neon-green strings, blue functions, yellow classes, cyan decorators |
+| `forest-night` | Profile copied from the *Forest Night – Ethereal* VS Code theme: amber keywords, teal strings, purple functions, rose types, sage constants |
 
 ## How it works
 
-1. The `colors.toml` palette (backgrounds, foregrounds, accent, selection, muted and the
-   16 terminal colors) is loaded and blended to get hover, border and caret-row shades.
+1. The theme's palette (backgrounds, foregrounds, accent, selection, muted and the terminal
+   colors) is loaded, missing colors are filled in, and the colors are blended to get hover,
+   border and caret-row shades.
 2. Syntax colors are set by **role** in the `R` dict (`keyword`, `string`, `func_decl`,
    `klass`, `decorator`, …), with defaults taken from the palette.
-3. If the theme's folder name appears in `PROFILES`, that profile overrides any of those roles.
-   Use a profile when a palette repeats colors (Forest Night's `blue` is the same as its
-   `cyan`), or when you want to match an existing editor theme exactly.
+3. If the theme's name appears in `PROFILES`, that profile overrides any of those roles. Use
+   a profile when a palette repeats colors (Forest Night's `blue` is the same as its `cyan`),
+   or when you want to match an existing editor theme exactly.
 4. The roles feed the `.icls` attributes and the named colors in `.theme.json`. Both files are
-   packed into a jar with a `plugin.xml` that registers a `themeProvider`.
+   packed into a jar with a `plugin.xml` that registers a `themeProvider`. The jar is built
+   with fixed timestamps, so rebuilding an unchanged theme produces the same file and
+   reinstalling it does nothing.
+5. The Omarchy plugin (`Service.qml`) watches `~/.local/state/omarchy/current/theme.name` and
+   runs `generate.py --current --install --json` when it changes.
 
 ### Adding a profile for a new theme
 
