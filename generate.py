@@ -23,8 +23,11 @@ Syntax colors default to a generic mapping of the Omarchy palette; themes listed
 PROFILES override individual roles (e.g. to match an upstream VS Code theme).
 """
 import argparse
+import io
 import json
+import os
 import re
+import stat
 import subprocess
 import sys
 import tomllib
@@ -818,45 +821,100 @@ out = args.out / SLUG
 outputs = {"icls": f"{FILE}.icls", "theme": f"{FILE}.theme.json", "jar": f"{FILE}.jar"}
 
 
-def owned_files(d):
-    """Files in d that an earlier run of this generator wrote, or None if d isn't ours."""
+def regular_file(path):
+    """True for a regular file that is not a symlink (never follows links)."""
+    try:
+        return stat.S_ISREG(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+
+def safe_write(path, data):
+    """Atomically replace path with data without ever following a symlink.
+
+    The content goes to a fresh temp file created with O_EXCL | O_NOFOLLOW, then
+    os.replace swaps it in; if path is a symlink, the link itself is replaced,
+    never its target.
+    """
+    data = data.encode() if isinstance(data, str) else data
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def legacy_owned(entries):
+    """Names in a pre-marker build dir, if the generator verifiably wrote all of them.
+
+    Older versions wrote <P>.jar, <P>.theme.json and "<Name>.icls", where Name was the
+    display name (--name or the default) and P is Name without spaces. Ownership is
+    proved by the jar itself: it must be this theme's plugin (same plugin ID) and
+    register <P>.theme.json; the .icls must match the name recorded in it.
+    """
+    names = set(entries)
+    jars = [n for n in names if n.endswith(".jar")]
+    if not names or len(names) > 3 or len(jars) != 1 or not all(regular_file(e) for e in entries.values()):
+        return None
+    stem = jars[0][:-len(".jar")]
+    try:
+        with zipfile.ZipFile(entries[jars[0]]) as z:
+            plugin_xml = z.read("META-INF/plugin.xml").decode("utf-8")
+    except (OSError, KeyError, ValueError, zipfile.BadZipFile):
+        return None
+    if f"<id>{ID}</id>" not in plugin_xml or f'path="/themes/{stem}.theme.json"' not in plugin_xml:
+        return None
+    m = re.search(r"<name>(.*?) Theme(?: \(Omarchy\))?</name>", plugin_xml)
+    allowed = {jars[0], f"{stem}.theme.json"} | ({f"{m.group(1)}.icls"} if m else set())
+    return names if names <= allowed else None
+
+
+def owned_names(d):
+    """Names in d that an earlier run of this generator wrote, or None if d isn't ours."""
     entries = {e.name: e for e in d.iterdir()}
+    if not entries:
+        return set()
     marker = entries.get(MARKER)
-    if marker is not None:
-        try:
-            data = json.loads(marker.read_text())
-            names = data["files"] if data.get("generator") == "omarchy-jetbrains" else None
-        except (OSError, ValueError, KeyError, TypeError):
-            names = None
-        if not isinstance(names, list):
-            return None
-        return [entries[n] for n in names
-                if isinstance(n, str) and n in entries and "/" not in n and entries[n].is_file()]
-    # Builds from before the marker existed held exactly these files.
-    legacy = {f"{FILE}.jar", f"{FILE}.theme.json", f"{DEFAULT_NAME}.icls"}
-    if entries and set(entries) <= legacy and all(e.is_file() and not e.is_symlink()
-                                                   for e in entries.values()):
-        return list(entries.values())
-    return None if entries else []
+    if marker is None:
+        return legacy_owned(entries)
+    if not regular_file(marker):
+        return None  # a symlinked or special marker proves nothing
+    try:
+        data = json.loads(marker.read_text())
+        names = data["files"] if data.get("generator") == "omarchy-jetbrains" else None
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        names = None
+    if not isinstance(names, list):
+        return None
+    # Only plain files directly inside d count; anything else listed is ignored.
+    return {n for n in names if isinstance(n, str) and n in entries and n != MARKER
+            and regular_file(entries[n])} | {MARKER}
 
 
 if out.is_symlink() or (out.exists() and not out.is_dir()):
     die(f"refusing to write to {out}: it is not a directory this generator created")
 if out.is_dir():
-    previous = owned_files(out)
-    if previous is None:
+    owned = owned_names(out)
+    if owned is None:
         die(f"refusing to write to {out}: it contains files this generator didn't create; "
             f"pick another --out")
-    for f in previous:
-        f.unlink()
+    # Never overwrite something the generator doesn't own, even under one of its names.
+    clash = [n for n in (*outputs.values(), MARKER) if os.path.lexists(out / n) and n not in owned]
+    if clash:
+        die(f"refusing to write to {out}: {', '.join(clash)} already exists and wasn't "
+            f"created by this generator")
+    for n in owned - {*outputs.values(), MARKER}:
+        (out / n).unlink()  # outputs from an older naming scheme; removes links, not targets
 out.mkdir(parents=True, exist_ok=True)
 
 scheme = icls()
 theme_json = json.dumps(theme, indent=2)
-(out / outputs["icls"]).write_text(scheme)
-(out / outputs["theme"]).write_text(theme_json)
-jar = out / outputs["jar"]
-with zipfile.ZipFile(jar, "w", zipfile.ZIP_DEFLATED) as z:
+jar_bytes = io.BytesIO()
+with zipfile.ZipFile(jar_bytes, "w", zipfile.ZIP_DEFLATED) as z:
     # Fixed timestamps keep the jar byte-identical across runs, so --install can tell
     # whether anything actually changed.
     for name, data in (("META-INF/plugin.xml", PLUGIN_XML),
@@ -865,8 +923,12 @@ with zipfile.ZipFile(jar, "w", zipfile.ZIP_DEFLATED) as z:
         info = zipfile.ZipInfo(name, date_time=(2024, 1, 1, 0, 0, 0))
         info.compress_type = zipfile.ZIP_DEFLATED
         z.writestr(info, data)
-(out / MARKER).write_text(json.dumps({"generator": "omarchy-jetbrains",
-                                      "files": sorted(outputs.values())}) + "\n")
+jar = out / outputs["jar"]
+safe_write(out / outputs["icls"], scheme)
+safe_write(out / outputs["theme"], theme_json)
+safe_write(jar, jar_bytes.getvalue())
+safe_write(out / MARKER, json.dumps({"generator": "omarchy-jetbrains",
+                                     "files": sorted(outputs.values())}) + "\n")
 
 
 def ide_dirs():
@@ -892,10 +954,8 @@ if args.install:
     dirs = ide_dirs()
     for d in dirs:
         dest = d / f"omarchy-theme-{SLUG}.jar"
-        if not dest.exists() or dest.read_bytes() != payload:
-            tmp = dest.with_suffix(".jar.tmp")
-            tmp.write_bytes(payload)
-            tmp.replace(dest)
+        if not regular_file(dest) or dest.read_bytes() != payload:
+            safe_write(dest, payload)
             changed = True
         installed.append(d.name)
     # Rebuild themes installed earlier so generator fixes reach them too. Each one is
